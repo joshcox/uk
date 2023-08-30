@@ -1,0 +1,22 @@
+{
+  "name": "uk",
+  "version": "0.0.0",
+  "description": "microKanren",
+  "main": "src/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joshcox/uk.git"
+  },
+  "keywords": [
+    "logic",
+    "microkanren",
+    "kanren",
+    "miniKanren"
+  ],
+  "author": "Josh Cox",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/joshcox/uk/issues"
+  },
+  "homepage": "https://github.com/joshcox/uk#readme"
+}
