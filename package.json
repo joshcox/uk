@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "description": "microKanren",
   "main": "src/index.js",
+  "scripts": {
+    "test": "node ./test/index"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/joshcox/uk.git"

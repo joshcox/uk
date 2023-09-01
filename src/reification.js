@@ -1,4 +1,4 @@
-const { isPair, cdr, car, map } = require("./list");
+const { isPair, cdr, car } = require("./list");
 const { walk, walkStar } = require("./substitution");
 const { isLvar, lvar } = require("./variable");
 
@@ -21,7 +21,10 @@ const reifyStateWithFirstVar = (state) => {
     return walkStar(term, reifyS(term, new Map()));
 };
 
-const reify = (states) => map(reifyStateWithFirstVar, states);
+/**
+ * @param {State[]} states
+ */
+const reify = (states) => states.map(reifyStateWithFirstVar);
 
 module.exports = {
     reify
