@@ -1,6 +1,6 @@
 const { strict: assert } = require("node:assert");
 const { describe, it } = require('node:test');
-const { empty, plus, map, unit, take, bind } = require("../../src/stream.gen");
+const { empty, plus, map, unit, take, bind } = require("../../src/stream");
 
 describe('empty', () => {
   it('should yield a stream with no items', () => {

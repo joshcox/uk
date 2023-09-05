@@ -1,6 +1,5 @@
-const { and, fresh, conde } = require("../../src/kanren");
 const { cons, empty } = require("../../src/list");
-const { unify } = require("../../src/microkanren");
+const { unify, and, fresh, conde } = require("../../src/microkanren");
 
 /**
  * @module test/utility/listo

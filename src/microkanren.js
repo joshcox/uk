@@ -1,120 +1,17 @@
-const { extendSubstitution, walk } = require("./substitution");
-const { isLvar, isLvarEqual, lvar } = require("./variable");
-
-const { car, cdr, isPair } = require("./list");
-const { plus, bind } = require("./stream.gen");
-
-class ConstraintStore {
-  all = [];
-  index = new Map();
-
-  constructor(all, index) {
-    this.all = all;
-    this.index = index;
-  }
-
-  add(constraint, { terms } = {}) {
-    const index = new Map(terms.filter(isLvar).map(term => [term, [constraint]]));
-    for (const [lvar, constraints] of this.index.entries()) {
-      index.set(lvar, [
-        ...constraints,
-        ...index.get(lvar) || []
-      ]);
-    }
-
-    return new ConstraintStore(
-      [...this.all, constraint],
-      index
-    );
-  }
-
-  check(substitution, { terms } = {}) {
-    const relevantConstraints = terms === undefined
-      ? this.all
-      : terms
-        .map(term => this.index.get(term) || [])
-        .flat();
-
-    for (const constraint of relevantConstraints) {
-      if (constraint.type === 'neq') {
-        const u1 = walk(constraint.term1, substitution);
-        const v1 = walk(constraint.term2, substitution);
-        if (u1 === v1 || isLvarEqual(u1, v1)) return false; // Constraint violated
-      }
-      // handle other constraint types as needed
-    }
-    return true; // All constraints satisfied
-  }
-}
-
-class State {
-  constructor(substitution, count, constraintStore) {
-    /**
-     * @type {Map<Term, Term>}
-     * @instance
-     */
-    this.substitution = substitution;
-    /**
-     * @type {number}
-     */
-    this.count = count;
-    /**
-     * @type {ConstraintStore}
-     */
-    this.constraints = constraintStore;
-  }
-
-  increment(n) {
-    return new State(this.substitution, this.count + n, this.constraints);
-  }
-
-  updateSubstitution(substitution) {
-    return new State(substitution, this.count, this.constraints);
-  }
-
-  addConstraint(constraint, { terms } = {}) {
-    return new State(this.substitution, this.count, this.constraints.add(constraint, { terms }));
-  }
-
-  isConsistent({ terms } = {}) {
-    return this.constraints.check(this.substitution, { terms });
-  }
-
-  static empty() {
-    return new State(new Map(), 0, new ConstraintStore([], new Map()));
-  }
-
-  get [Symbol.toStringTag]() {
-    return 'State';
-  }
-
-  [Symbol.for('nodejs.util.inspect.custom')]() {
-    return `State { substitution: ${JSON.stringify(this.substitution)}, count: ${this.count} }`;
-  }
-}
-
-// unification algorithm
-const unification = (term1, term2, substitution) => {
-  const u1 = walk(term1, substitution);
-  const v1 = walk(term2, substitution);
-  if (isLvarEqual(u1, v1)) {
-    return substitution;
-  } else if (isLvar(u1)) {
-    return extendSubstitution(u1, v1, substitution);
-  } else if (isLvar(v1)) {
-    return extendSubstitution(v1, u1, substitution);
-  } else if (isPair(u1) && isPair(v1)) {
-    const s = unification(car(u1), car(v1), substitution);
-    return s && unification(cdr(u1), cdr(v1), s);
-  } else {
-    return u1 === v1 ? substitution : false;
-  }
-};
-
-// microkanren
+const { LogicVariable } = require("./variable");
+const { plus, bind, take } = require("./stream");
+const { State } = require("./data/state");
+const { reify } = require("./reification");
 
 /**
+ * @typedef {import("./data/substitution").Substitution} Substitution
  * @typedef {undefined | null | boolean | string | number | List | Symbol} Term
+ *
+ */
+
+/**
+ * A goal is a function that, given a state, returns a `Generator<State>`.
+ * A function that returns a goal is denoted as a "Goal Constructor".
  * @typedef {(state: State) => Generator<State>} Goal
  */
 
@@ -124,9 +21,9 @@ const unification = (term1, term2, substitution) => {
  * @returns {Goal} that succeeds if term1 and term2 unify
  */
 const unify = (term1, term2) => function* (state) {
-  const substitution = unification(term1, term2, state.substitution);
+  const substitution = state.substitution.unify(term1, term2);
   if (substitution !== false) {
-    const newState = state.updateSubstitution(substitution);
+    const newState = state.update({ substitution });
     if (newState.isConsistent({ terms: [term1, term2] })) {
       yield newState;
     }
@@ -138,17 +35,32 @@ const unify = (term1, term2) => function* (state) {
  * @param {Term} term2
  * @returns {Goal} that succeeds if term1 and term2 are not equal
  */
-const neq = (term1, term2) => function* (state) {
-  const newConstraint = {
-    type: 'neq',
-    term1,
-    term2
-  };
+const notEqual = (term1, term2) => function* (state) {
+  const newState = state.update({
+    constraints: state.constraints.add({
+      type: 'neq',
+      term1,
+      term2
+    }, { terms: [term1, term2] })
+  });
 
-  const newState = state.addConstraint(newConstraint, { terms: [term1, term2] });
   if (newState.isConsistent({ terms: [term1, term2] })) {
     yield newState;
   }
+};
+
+/**
+ * @param {...Term} terms
+ * @returns {Goal} that succeeds if all terms are not equal
+ */
+const noneEqual = (...terms) => function* (state) {
+  const constraints = [];
+  for (let i = 0; i < terms.length; i++) {
+    for (let j = i + 1; j < terms.length; j++) {
+      constraints.push(notEqual(terms[i], terms[j]));
+    }
+  }
+  yield* and(...constraints)(state);
 };
 
 /**
@@ -156,25 +68,96 @@ const neq = (term1, term2) => function* (state) {
  * @param {Goal} goal2
  * @returns {Goal} that succeeds if either goal1 or goal2 succeeds
  */
-const disj = (goal1, goal2) => function* (state) {
+const disjunction = (goal1, goal2) => function* (state) {
   yield* plus(goal1(state), goal2(state));
 };
+
+/**
+ * @param {...Goal} goals
+ * @returns {Goal} that succeeds if any goal succeeds
+ */
+const disjunctionAll = (...goals) => function* (state) {
+  yield* goals.reduceRight((acc, goal) => disjunction(goal, acc), fail)(state);
+};
+
+/**
+ * @alias disjunctionAll
+ */
+const or = disjunctionAll;
 
 /**
  * @param {Goal} goal1
  * @param {Goal} goal2
  * @returns {Goal} that succeeds if both goal1 and goal2 succeed
  */
-const conj = (goal1, goal2) => function* (state) {
+const conjunction = (goal1, goal2) => function* (state) {
   yield* bind(goal1(state), goal2);
 };
 
 /**
- * @param {(lvar: Term) => Goal} f
+ * @param {...Goal} goals
+ * @returns {Goal} that succeeds if all goals succeed
+ */
+const conjunctionAll = (...goals) => function* (state) {
+  yield* goals.reduceRight((acc, goal) => conjunction(goal, acc), success)(state);
+};
+
+/**
+ * @alias conjunctionAll
+ */
+const and = conjunctionAll;
+
+/**
+ * Each array of goals is a "clause". The conde goal is a disjunction of conjunctions.
+ * That is it to say, if any clause succeeds where each clause is a conjunction of goals, 
+ * then the conde goal succeeds.
+ * @param {...Goal[]} clauses
+ * @returns {Goal} that succeeds if any clause succeeds
+ */
+const conde = function* (...clauses) {
+  yield* or(...clauses.map((goals) => and(...goals)));
+};
+
+/**
+ * @param {(lvar: LogicVariable) => Goal} freshGoalConstructor
  * @returns {Goal} that succeeds if f succeeds with a fresh lvar
  */
-const callWithFresh = (f) => function* (state) {
-  yield* f(lvar(`_${state.count}`))(state.increment(1));
+const callWithFresh = (freshGoalConstructor) => function* (state) {
+  const { variable, variables } = state.variables.fresh();
+  yield* freshGoalConstructor(variable)(state.update({ variables }));
+};
+
+/**
+ * @param {(...lvars: LogicVariable[]) => Goal} freshGoalConstructor
+ * @returns {Goal} that succeeds if f succeeds with fresh lvars
+ */
+const fresh = (freshGoalConstructor) => function* (state) {
+  let variables = state.variables;
+  let lvars = [];
+  for (let i = 0; i < freshGoalConstructor.length; i++) {
+    const fresh = variables.fresh();
+    lvars.push(fresh.variable);
+    variables = fresh.variables;
+  }
+
+  // call the fresh goal constructor with the lvars and the new state
+  yield* freshGoalConstructor(...lvars)(state.update({ variables }));
+};
+
+const withLogicVariables = fresh;
+
+/**
+ * @type {Goal} that always succeeds
+ */
+const success = function* (state) {
+  yield state;
+};
+
+/**
+ * @type {Goal} that always fails
+ */
+const fail = function* (_state) {
+  return;
 };
 
 /**
@@ -185,16 +168,42 @@ const delay = (goal) => (state) => () => goal()(state);
 
 /**
  * @param {Goal} goal
+ * @param {State} state
+ * @returns {Generator<State>} that is called with a state
+ */
+const callWithState = (goal, state) => goal(state);
+
+/**
+ * @param {Goal} goal
  * @returns {Generator<State>} that is called with an empty state
  */
 const callWithEmptyState = (goal) => goal(State.empty());
 
+/**
+ * @param {number} numberOfAnswers
+ * @param {(lvar: Term) => Goal} freshGoalConstructor
+ */
+const run = (numberOfAnswers, freshGoalConstructor) => reify(
+  take(numberOfAnswers, callWithEmptyState(fresh(freshGoalConstructor)))
+);
+
 module.exports = {
+  success,
+  fail,
   unify,
-  neq,
-  disj,
-  conj,
+  notEqual,
+  noneEqual,
+  disjunction,
+  disjunctionAll,
+  or,
+  conjunction,
+  conjunctionAll,
+  and,
+  conde,
   callWithFresh,
+  fresh,
+  withLogicVariables,
   delay,
-  callWithEmptyState
+  callWithEmptyState,
+  run
 };

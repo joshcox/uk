@@ -1,9 +1,6 @@
 const { strict: assert } = require("node:assert");
 const { describe, it } = require('node:test');
-const { and, fresh, run } = require("../../src/kanren");
-const { list } = require("../../src/list");
-const { unify, callWithEmptyState, callWithFresh, disj, conj } = require("../../src/microkanren");
-const { appendo } = require("../utility/listo");
+const { unify, callWithEmptyState, callWithFresh, disjunction, conjunction } = require("../../src/microkanren");
 
 describe('unify', () => {
     it('yields the state in which the two values are unified', () => {
@@ -23,7 +20,7 @@ describe('unify', () => {
 describe('disj', () => {
     describe('when the child goals yield 0 or 1 states', () => {
         it('yields the states of the first goal when only first goal succeeds', () => {
-            const states = callWithEmptyState(disj(unify(true, true), unify(true, false)));
+            const states = callWithEmptyState(disjunction(unify(true, true), unify(true, false)));
             const { value, done } = states.next();
             assert.notEqual(value, undefined);
             assert.equal(done, false);
@@ -31,7 +28,7 @@ describe('disj', () => {
         });
 
         it('yields the states of the second goal when only second goal succeeds', () => {
-            const states = callWithEmptyState(disj(unify(true, false), unify(true, true)));
+            const states = callWithEmptyState(disjunction(unify(true, false), unify(true, true)));
             const { value, done } = states.next();
             assert.notEqual(value, undefined);
             assert.equal(done, false);
@@ -39,12 +36,12 @@ describe('disj', () => {
         });
 
         it('yields no states when neither goal succeeds', () => {
-            const states = callWithEmptyState(disj(unify(true, false), unify(true, false)));
+            const states = callWithEmptyState(disjunction(unify(true, false), unify(true, false)));
             assert.equal(states.next().done, true);
         });
 
         it('yields states from both goals when both goals succeed', () => {
-            const states = callWithEmptyState(disj(unify(true, true), unify(true, true)));
+            const states = callWithEmptyState(disjunction(unify(true, true), unify(true, true)));
             const { value, done } = states.next();
             assert.notEqual(value, undefined);
             assert.equal(done, false);
@@ -59,22 +56,22 @@ describe('disj', () => {
 describe('conj', () => {
     describe('when the child goals yield 0 or 1 states', () => {
         it('yields no states when only first goal succeeds', () => {
-            const states = callWithEmptyState(conj(unify(true, true), unify(true, false)));
+            const states = callWithEmptyState(conjunction(unify(true, true), unify(true, false)));
             assert.equal(states.next().done, true);
         });
 
         it('yields no states when only second goal succeeds', () => {
-            const states = callWithEmptyState(conj(unify(true, false), unify(true, true)));
+            const states = callWithEmptyState(conjunction(unify(true, false), unify(true, true)));
             assert.equal(states.next().done, true);
         });
 
         it('yields no states when neither goal succeeds', () => {
-            const states = callWithEmptyState(conj(unify(true, false), unify(true, false)));
+            const states = callWithEmptyState(conjunction(unify(true, false), unify(true, false)));
             assert.equal(states.next().done, true);
         });
 
         it('yields states that are successful under both goals', () => {
-            const states = callWithEmptyState(conj(unify(true, true), unify(true, true)));
+            const states = callWithEmptyState(conjunction(unify(true, true), unify(true, true)));
             const { value, done } = states.next();
             assert.notEqual(value, undefined);
             assert.equal(done, false);
@@ -84,23 +81,23 @@ describe('conj', () => {
 });
 
 describe('selection logic', () => {
-    const parentOfGrandparent = (parent, grandparent) => disj(
-        conj(unify(parent, 'Judy'), unify(grandparent, 'Eva')),
-        conj(unify(parent, 'Wanita'), unify(grandparent, 'Hans')),
+    const parentOfGrandparent = (parent, grandparent) => disjunction(
+        conjunction(unify(parent, 'Judy'), unify(grandparent, 'Eva')),
+        conjunction(unify(parent, 'Wanita'), unify(grandparent, 'Hans')),
     );
 
-    const childOfParent = (child, parent) => disj(
-        disj(
-            conj(unify(child, 'Patti'), unify(parent, 'Judy')),
-            conj(unify(child, 'Becky'), unify(parent, 'Judy')),
+    const childOfParent = (child, parent) => disjunction(
+        disjunction(
+            conjunction(unify(child, 'Patti'), unify(parent, 'Judy')),
+            conjunction(unify(child, 'Becky'), unify(parent, 'Judy')),
         ),
-        disj(
-            conj(unify(child, 'Tom'), unify(parent, 'Wanita')),
-            conj(unify(child, 'Greg'), unify(parent, 'Wanita')),
+        disjunction(
+            conjunction(unify(child, 'Tom'), unify(parent, 'Wanita')),
+            conjunction(unify(child, 'Greg'), unify(parent, 'Wanita')),
         )
     );
 
-    const selectOneChild = (child, parent, grandparent) => conj(
+    const selectOneChild = (child, parent, grandparent) => conjunction(
         childOfParent(child, parent),
         parentOfGrandparent(parent, grandparent)
     );
@@ -113,31 +110,5 @@ describe('selection logic', () => {
                         selectOneChild(child, parent, grandparent)))));
         const state = states.next();
         assert.equal(state.done, false);
-    });
-});
-
-describe('general', () => {
-    const listsWithPrefix = (prefix) => run(10, (solution) =>
-        // Create three logic variables for holding the first list, second list, and output list of append function
-        fresh((firstList, secondList, outList) => and(
-            // Declare that the solution contains each of the three lists/logic variables
-            unify(solution, list(
-                list('First List', firstList),
-                list('Second List', secondList),
-                list('Out List', outList)
-            )),
-            // Create a fresh logic variable for holding the postfix of the output list
-            fresh((postfix) => and(
-                // prefix appended to post fix unifies w/ the output list
-                appendo(prefix, postfix, outList),
-                // first list appended to second list unifies w/ the output list
-                appendo(firstList, secondList, outList)
-            ))
-        )));
-
-    it.skip('should work', () => {
-        const solutions = listsWithPrefix(list(1, 2, 3, 4, 5));
-        const solutionsInArrays = toArray(map(toArray, solutions));
-        assert.equal(solutionsInArrays.length, 10);
     });
 });
