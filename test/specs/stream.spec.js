@@ -41,8 +41,8 @@ describe('plus', () => {
   });
 
   it('interleaves two non-empty streams', () => {
-    const first = [1, 3, 5][Symbol.iterator]();
-    const second = [2, 4, 6][Symbol.iterator]();
+    const first = () => [4, 5, 6][Symbol.iterator]();
+    const second = [1, 2, 3][Symbol.iterator]();
     const interleaved = plus(first, second);
     assert.equal(interleaved.next().value, 1);
     assert.equal(interleaved.next().value, 2);
@@ -66,13 +66,13 @@ describe('bind', () => {
     assert.equal(stream.next().done, true);
   });
 
-  it('interleaves the values of all streams created by the mapper function', () => {
+  it('appends the values of all streams created by the mapper function', () => {
     const stream = bind([1, 2, 3][Symbol.iterator](), (num) => [num, num][Symbol.iterator]());
     assert.equal(stream.next().value, 1);
-    assert.equal(stream.next().value, 2);
     assert.equal(stream.next().value, 1);
-    assert.equal(stream.next().value, 3);
     assert.equal(stream.next().value, 2);
+    assert.equal(stream.next().value, 2);
+    assert.equal(stream.next().value, 3);
     assert.equal(stream.next().value, 3);
     assert.equal(stream.next().done, true);
   });
